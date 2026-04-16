@@ -30,8 +30,8 @@ with st.sidebar:
 
     selected_mains = st.multiselect(
         "Main categories",
-        BBB_POPULAR_MAIN_CATEGORIES,
-        default=[BBB_POPULAR_MAIN_CATEGORIES[0]] if BBB_POPULAR_MAIN_CATEGORIES else [],
+        FALLBACK_CATEGORIES,
+        default=[FALLBACK_CATEGORIES[0]] if FALLBACK_CATEGORIES else [],
     )
 
     use_all_subcategories = st.checkbox("Use all subcategories from selected main categories", value=True)
