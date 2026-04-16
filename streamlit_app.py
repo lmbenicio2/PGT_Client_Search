@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from business_finder_core import (
-    BBB_POPULAR_MAIN_CATEGORIES,
+    FALLBACK_CATEGORIES,
     MAIN_CATEGORY_MAP,
     US_STATES,
     load_cities_by_state_from_csv_obj,
