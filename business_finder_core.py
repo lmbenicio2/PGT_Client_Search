@@ -223,6 +223,18 @@ FALLBACK_CATEGORIES = sorted([
     "Yoga Instruction",
 ])
 
+BBB_POPULAR_MAIN_CATEGORIES = [
+    "Auto Repairs",
+    "Business Services",
+    "General Contractor",
+    "Painting Contractors",
+    "Roofing Contractors",
+    "Plumber",
+    "Lawn Maintenance",
+    "Tax Return Preparation",
+    "Construction Services",
+    "Electrician",
+]
 MAIN_CATEGORY_MAP = {
     "Auto Repairs": [
         "Auto Repairs", "Auto Body Repair and Painting", "Auto Repair Consultants",
