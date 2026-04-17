@@ -21,7 +21,7 @@ from business_finder_core import (
 
 st.set_page_config(page_title="Automatic Business Finder", layout="wide")
 st.title("Automatic Business Finder")
-st.caption("Stable version with background jobs, CSV backup, checkpoint resume, delete-job option, full BBB category loading, subcategories, and safe mode for large cities.")
+st.caption("Stable version with background jobs, CSV backup, checkpoint resume, and safe mode for large cities.")
 
 JOBS_DIR = Path("job_runs")
 JOBS_DIR.mkdir(exist_ok=True)
