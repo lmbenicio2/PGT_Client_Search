@@ -392,6 +392,7 @@ def get_all_selectable_categories() -> list:
         cats.update(subs)
     return sorted(cats, key=str.lower)
 
+
 def get_default_category_list() -> list:
     cats = set(FALLBACK_CATEGORIES)
     cats.update(MAIN_CATEGORY_MAP.keys())
@@ -1068,17 +1069,47 @@ def build_category_plan(selected_categories, selected_subcategories=None, use_al
             plan[cat] = [cat]
     return plan
 
+
 def save_job_state(state_data: dict):
-    state_data["updated_at"] = datetime.now().isoformat()
-    with open(state_data["job_state_path"], "w", encoding="utf-8") as f:
-        json.dump(state_data, f, indent=2)
+    with JOB_STATE_LOCK:
+        state_data["updated_at"] = datetime.now().isoformat()
+        path = state_data["job_state_path"]
+        tmp_path = f"{path}.tmp"
+        backup_path = f"{path}.bak"
+
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as src, open(backup_path, "w", encoding="utf-8") as dst:
+                    dst.write(src.read())
+            except Exception:
+                pass
+
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(tmp_path, path)
+
 
 def read_job_state(job_dir: str):
     path = os.path.join(job_dir, "job_state.json")
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    candidate_paths = [path, f"{path}.bak", f"{path}.tmp"]
+
+    for candidate in candidate_paths:
+        if not os.path.exists(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    continue
+                return json.loads(content)
+        except Exception:
+            continue
+
+    return None
+
 
 def delete_job(job_dir: str):
     if os.path.exists(job_dir):
