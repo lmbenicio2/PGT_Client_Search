@@ -1,4 +1,3 @@
-
 import io
 import os
 import threading
@@ -6,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from business_finder_core import (
     US_STATES,
@@ -21,44 +21,60 @@ from business_finder_core import (
 
 st.set_page_config(page_title="Automatic Business Finder", layout="wide")
 st.title("Automatic Business Finder")
-st.caption("Stable version with background jobs, CSV backup, checkpoint resume, and safe mode for large cities.")
+st.caption("Stable version with live auto-refresh logs, always-on business email lookup, CSV backup, checkpoint resume, and final XLSX output.")
 
 JOBS_DIR = Path("job_runs")
 JOBS_DIR.mkdir(exist_ok=True)
 CACHE_DIR = Path(".cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-if "active_logs" not in st.session_state:
-    st.session_state["active_logs"] = {}
+st_autorefresh(interval=3000, key="job_autorefresh")
+
 if "active_threads" not in st.session_state:
     st.session_state["active_threads"] = {}
 
-def append_log(job_id: str, message: str):
-    st.session_state["active_logs"].setdefault(job_id, [])
-    st.session_state["active_logs"][job_id].append(str(message))
-    st.session_state["active_logs"][job_id] = st.session_state["active_logs"][job_id][-500:]
+def append_log(job_dir: str, message: str):
+    os.makedirs(job_dir, exist_ok=True)
+    log_path = os.path.join(job_dir, "job.log")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(str(message) + "\n")
 
-def start_background_job(job_id: str, job_dir: str, mode: str, enrich_emails: bool):
+def read_live_log(job_dir: str) -> str:
+    log_path = os.path.join(job_dir, "job.log")
+    if not os.path.exists(log_path):
+        return ""
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-500:]
+        return "".join(lines)
+    except Exception:
+        return ""
+
+def start_background_job(job_id: str, job_dir: str, mode: str):
     def logger(msg):
-        append_log(job_id, msg)
+        append_log(job_dir, msg)
+
     def runner():
         try:
-            run_job_with_resume(job_dir=job_dir, mode=mode, enrich_emails=enrich_emails, logger=logger)
+            run_job_with_resume(job_dir=job_dir, mode=mode, enrich_emails=True, logger=logger)
         except Exception as e:
-            append_log(job_id, f"ERROR: {e}")
+            append_log(job_dir, f"ERROR: {e}")
+
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
     st.session_state["active_threads"][job_id] = thread
 
 with st.sidebar:
     st.header("1) Upload cities.csv")
-    st.write("CSV must include: city, state_id, state_name")
     cities_file = st.file_uploader("Upload cities.csv", type=["csv"])
+
     st.header("2) Search options")
     state = st.selectbox("State", US_STATES, index=US_STATES.index("IL") if "IL" in US_STATES else 0)
+
     cities_by_state = load_cities_by_state_from_csv_obj(cities_file) if cities_file else {}
     city_options = cities_by_state.get(state, [])
     selected_cities = st.multiselect("Cities", city_options)
+
     refresh_cats = st.checkbox("Refresh BBB categories now", value=False)
     all_categories = get_cached_bbb_categories(str(CACHE_DIR), force_refresh=refresh_cats)
     selected_categories = st.multiselect("All BBB categories", all_categories)
@@ -71,9 +87,10 @@ with st.sidebar:
         disabled=use_all_subcategories or len(available_subcategories) == 0,
     )
 
-    mode = st.radio("Run mode", ["safe", "fast"], index=0, help="Safe mode uses fewer workers and saves more often.")
-    enrich_emails = st.checkbox("Get emails too", value=True, help="Kept on. Email lookup is faster now because results are cached by website domain.")
+    mode = st.radio("Run mode", ["safe", "fast"], index=0, help="Safe mode is recommended for large cities.")
+    st.caption("Business email lookup is always enabled.")
     output_name = st.text_input("Output Excel name", value="business_results.xlsx")
+
     st.header("3) Existing jobs")
     existing_jobs = sorted([p.name for p in JOBS_DIR.iterdir() if p.is_dir()])
     selected_job_to_resume = st.selectbox("Choose job folder", [""] + existing_jobs)
@@ -102,12 +119,21 @@ if start_clicked:
     else:
         job_id = make_safe_job_id(f"{state}_{'_'.join(selected_cities[:2])}_{len(selected_categories)}cats")
         job_dir = str(JOBS_DIR / job_id)
-        initialize_job(job_dir, selected_categories, selected_subcategories, use_all_subcategories, selected_cities, state, output_name)
-        st.session_state["active_logs"][job_id] = []
-        append_log(job_id, f"Job created: {job_id}")
-        append_log(job_id, f"Mode: {mode}")
-        append_log(job_id, f"Email enrichment: {enrich_emails}")
-        start_background_job(job_id, job_dir, mode, enrich_emails)
+
+        initialize_job(
+            job_dir,
+            selected_categories,
+            selected_subcategories,
+            use_all_subcategories,
+            selected_cities,
+            state,
+            output_name,
+        )
+        append_log(job_dir, f"Job created: {job_id}")
+        append_log(job_dir, f"Mode: {mode}")
+        append_log(job_dir, "Email enrichment: True")
+        append_log(job_dir, "Background job started.")
+        start_background_job(job_id, job_dir, mode)
         st.success(f"Started background job: {job_id}")
 
 if resume_clicked:
@@ -120,9 +146,8 @@ if resume_clicked:
         if not state_data:
             st.error("Could not read that job.")
         else:
-            st.session_state["active_logs"].setdefault(job_id, [])
-            append_log(job_id, f"Resuming job: {job_id}")
-            start_background_job(job_id, job_dir, mode, enrich_emails)
+            append_log(job_dir, f"Resuming job: {job_id}")
+            start_background_job(job_id, job_dir, mode)
             st.success(f"Resumed background job: {job_id}")
 
 st.subheader("Jobs")
@@ -132,37 +157,60 @@ if not job_dirs:
     st.info("No jobs yet.")
 else:
     for job_path in job_dirs[:20]:
-        job_state = read_job_state(str(job_path))
+        try:
+            job_state = read_job_state(str(job_path))
+        except Exception:
+            continue
+
         if not job_state:
             continue
+
         with st.expander(f"{job_path.name} — {job_state.get('status', 'unknown')}"):
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Saved rows", job_state.get("saved_rows", 0))
             m2.metric("Cities", len(job_state.get("cities", [])))
             m3.metric("Categories", len(job_state.get("selected_categories", [])))
             m4.metric("Subcategories", len(job_state.get("selected_subcategories", [])))
+
             st.write("State:", job_state.get("state", ""))
             st.write("Current city index:", job_state.get("current_city_index", 0))
             st.write("Current main index:", job_state.get("current_main_index", 0))
             st.write("Current sub index:", job_state.get("current_sub_index", 0))
+
             if job_state.get("last_error"):
                 st.error(job_state["last_error"])
-            log_text = "\n".join(st.session_state.get("active_logs", {}).get(job_path.name, []))
-            st.text_area("Live logs", value=log_text, height=200, key=f"logs_{job_path.name}")
+
+            log_text = read_live_log(str(job_path))
+            st.text_area("Live logs", value=log_text, height=220, key=f"logs_{job_path.name}")
+
             csv_path = job_state.get("csv_path", "")
             excel_path = job_state.get("excel_path", "")
+
             if csv_path and os.path.exists(csv_path):
                 with open(csv_path, "rb") as f:
                     csv_data = f.read()
-                st.download_button("Download CSV backup", data=csv_data, file_name=os.path.basename(csv_path), mime="text/csv", key=f"csv_{job_path.name}")
+                st.download_button(
+                    "Download CSV backup",
+                    data=csv_data,
+                    file_name=os.path.basename(csv_path),
+                    mime="text/csv",
+                    key=f"csv_{job_path.name}",
+                )
                 try:
                     df = pd.read_csv(io.BytesIO(csv_data))
                     st.dataframe(df.head(50), use_container_width=True)
                 except Exception:
                     pass
+
             if excel_path and os.path.exists(excel_path):
                 with open(excel_path, "rb") as f:
                     excel_data = f.read()
-                st.download_button("Download Excel file (.xlsx)", data=excel_data, file_name=os.path.basename(excel_path), mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"xlsx_{job_path.name}")
+                st.download_button(
+                    "Download Excel file (.xlsx)",
+                    data=excel_data,
+                    file_name=os.path.basename(excel_path),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"xlsx_{job_path.name}",
+                )
 
-st.info("Emails stay enabled. This version speeds email collection by caching one result per website domain across the whole job, supports deleting previous jobs, keeps optional subcategory selection, and still saves the final file as .xlsx.")
+st.info("Logs refresh automatically every 3 seconds. Business email lookup is always enabled and sped up by per-domain caching, while the final file is still saved as .xlsx.")
