@@ -25,8 +25,8 @@ DEFAULT_SAVE_EVERY_N_ROWS = 5
 DEFAULT_SEARCH_DELAY = 0.25
 DEFAULT_PROFILE_DELAY = 0.25
 CATEGORY_MATCH_THRESHOLD = 0.20
-EMAIL_LOOKUP_TIMEOUT = 8
-CONTACT_PAGE_PATHS = ["", "/contact", "/contact-us", "/about", "/about-us"]
+EMAIL_LOOKUP_TIMEOUT = 5
+CONTACT_PAGE_PATHS = ["", "/contact", "/contact-us"]
 BAD_EMAIL_PREFIXES = (
     "privacy@", "support@cloudflare", "noreply@", "no-reply@",
     "info@bbb.org", "help@", "support@",
@@ -1121,6 +1121,7 @@ def initialize_job(job_dir: str, selected_categories, selected_subcategories, us
     csv_path = os.path.join(job_dir, "results_progress.csv")
     excel_path = os.path.join(job_dir, output_name if output_name.lower().endswith(".xlsx") else f"{output_name}.xlsx")
     email_cache_path = os.path.join(job_dir, "email_cache.json")
+    log_path = os.path.join(job_dir, "job.log")
 
     search_plan = build_category_plan(
         selected_categories=selected_categories,
@@ -1134,6 +1135,7 @@ def initialize_job(job_dir: str, selected_categories, selected_subcategories, us
         "csv_path": csv_path,
         "excel_path": excel_path,
         "email_cache_path": email_cache_path,
+        "log_path": log_path,
         "selected_categories": selected_categories,
         "selected_subcategories": selected_subcategories,
         "use_all_subcategories": use_all_subcategories,
@@ -1155,7 +1157,7 @@ def initialize_job(job_dir: str, selected_categories, selected_subcategories, us
     save_job_state(state_data)
     return state_data
 
-def run_job_with_resume(job_dir: str, mode: str = "safe", enrich_emails: bool = False, logger=print):
+def run_job_with_resume(job_dir: str, mode: str = "safe", enrich_emails: bool = True, logger=print):
     state_data = read_job_state(job_dir)
     if not state_data:
         raise FileNotFoundError("No job state found to resume.")
@@ -1189,6 +1191,7 @@ def run_job_with_resume(job_dir: str, mode: str = "safe", enrich_emails: bool = 
                     state_data["current_sub_index"] = sub_idx
                     save_job_state(state_data)
                     logger(f"Searching subcategory: {subcategory}")
+                    logger("Searching BBB pages and collecting business profiles...")
                     businesses = client.search_bbb(subcategory, current_city, state, logger)
                     if enrich_emails:
                         businesses = client.enrich_missing_emails(businesses, logger, cfg["email_workers"])
@@ -1222,6 +1225,7 @@ def run_job_with_resume(job_dir: str, mode: str = "safe", enrich_emails: bool = 
                     state_data["seen_row_keys"] = [list(x) for x in seen_rows]
                     save_job_state(state_data)
                     logger(f"Saved {new_in_sub} new row(s) from '{subcategory}' in {current_city}")
+                    logger("Checkpoint saved.")
                 state_data["current_sub_index"] = 0
                 save_job_state(state_data)
             state_data["current_main_index"] = 0
