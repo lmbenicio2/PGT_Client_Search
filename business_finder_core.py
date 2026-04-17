@@ -392,6 +392,13 @@ def get_all_selectable_categories() -> list:
         cats.update(subs)
     return sorted(cats, key=str.lower)
 
+def get_default_category_list() -> list:
+    cats = set(FALLBACK_CATEGORIES)
+    cats.update(MAIN_CATEGORY_MAP.keys())
+    for subs in MAIN_CATEGORY_MAP.values():
+        cats.update(subs)
+    return sorted(cats, key=str.lower)
+
 def get_cached_bbb_categories(cache_dir: str, force_refresh: bool = False) -> list:
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, "bbb_categories_cache.json")
