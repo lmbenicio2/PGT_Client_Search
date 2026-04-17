@@ -1073,6 +1073,10 @@ def read_job_state(job_dir: str):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def delete_job(job_dir: str):
+    if os.path.exists(job_dir):
+        shutil.rmtree(job_dir, ignore_errors=True)
+
 def initialize_job(job_dir: str, selected_categories, selected_subcategories, use_all_subcategories, cities, state, output_name: str):
     os.makedirs(job_dir, exist_ok=True)
     job_state_path = os.path.join(job_dir, "job_state.json")
