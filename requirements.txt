@@ -4,4 +4,4 @@ requests
 beautifulsoup4
 openpyxl
 urllib3
-
+streamlit-autorefresh
