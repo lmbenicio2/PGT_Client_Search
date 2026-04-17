@@ -3,13 +3,16 @@ import os
 import re
 import csv
 import json
+import shutil
 import difflib
 import time
-import threading
 from datetime import datetime
 from html import unescape
 from urllib.parse import quote_plus, urljoin, urlparse, unquote, parse_qs
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+JOB_STATE_LOCK = threading.Lock()
 
 import requests
 from bs4 import BeautifulSoup
@@ -431,7 +434,7 @@ class BusinessSearchClient:
         session.mount("http://", adapter)
         return session
     def fetch_all_bbb_categories(self) -> list:
-        all_categories = set()
+        all_categories = set(get_default_category_list())
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         try:
             main_html = self._get_html(BBB_CATEGORIES_URL)
@@ -442,8 +445,7 @@ class BusinessSearchClient:
                     all_categories.add(text)
             for letter in letters:
                 try:
-                    url = f"{BBB_CATEGORIES_URL}/{letter.lower()}"
-                    html = self._get_html(url)
+                    html = self._get_html(f"{BBB_CATEGORIES_URL}/{letter.lower()}")
                     soup = BeautifulSoup(html, "html.parser")
                     for a in soup.select("a[href*='/us/category/']"):
                         text = self._clean(a.get_text(" ", strip=True))
@@ -998,14 +1000,14 @@ def get_runtime_config(mode: str):
     if mode == "fast":
         return {
             "max_workers": 4,
-            "email_workers": 3,
+            "email_workers": 6,
             "save_every_rows": 10,
             "search_delay": 0.15,
             "profile_delay": 0.15,
         }
     return {
         "max_workers": 3,
-        "email_workers": 2,
+        "email_workers": 5,
         "save_every_rows": 5,
         "search_delay": 0.25,
         "profile_delay": 0.25,
@@ -1021,71 +1023,43 @@ def build_category_plan(selected_categories):
         plan[cat] = MAIN_CATEGORY_MAP.get(cat, [cat])
     return plan
 
-
-JOB_STATE_LOCK = threading.Lock()
-
 def save_job_state(state_data: dict):
-    with JOB_STATE_LOCK:
-        state_data["updated_at"] = datetime.now().isoformat()
-        path = state_data["job_state_path"]
-        tmp_path = f"{path}.tmp"
-        backup_path = f"{path}.bak"
-
-        # Create backup
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as src, open(backup_path, "w", encoding="utf-8") as dst:
-                    dst.write(src.read())
-            except Exception:
-                pass
-
-        # Safe write
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(state_data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-
-        os.replace(tmp_path, path)
+    state_data["updated_at"] = datetime.now().isoformat()
+    with open(state_data["job_state_path"], "w", encoding="utf-8") as f:
+        json.dump(state_data, f, indent=2)
 
 def read_job_state(job_dir: str):
-    job_state_path = os.path.join(job_dir, "job_state.json")
+    path = os.path.join(job_dir, "job_state.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    candidate_paths = [
-        job_state_path,
-        f"{job_state_path}.bak",
-        f"{job_state_path}.tmp",
-    ]
-
-    for path in candidate_paths:
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if not content:
-                    continue
-                return json.loads(content)
-        except json.JSONDecodeError:
-            continue
-        except Exception:
-            continue
-
-    return None
-
-def initialize_job(job_dir: str, selected_categories, cities, state, output_name: str):
+def initialize_job(job_dir: str, selected_categories, selected_subcategories, use_all_subcategories, cities, state, output_name: str):
     os.makedirs(job_dir, exist_ok=True)
     job_state_path = os.path.join(job_dir, "job_state.json")
     csv_path = os.path.join(job_dir, "results_progress.csv")
     excel_path = os.path.join(job_dir, output_name if output_name.lower().endswith(".xlsx") else f"{output_name}.xlsx")
+    email_cache_path = os.path.join(job_dir, "email_cache.json")
+
+    search_plan = build_subcategory_plan(
+        selected_mains=selected_categories,
+        selected_subs=selected_subcategories,
+        use_all_subcategories=use_all_subcategories,
+    )
+
     state_data = {
         "job_dir": job_dir,
         "job_state_path": job_state_path,
         "csv_path": csv_path,
         "excel_path": excel_path,
+        "email_cache_path": email_cache_path,
         "selected_categories": selected_categories,
+        "selected_subcategories": selected_subcategories,
+        "use_all_subcategories": use_all_subcategories,
         "cities": cities,
         "state": state,
-        "search_plan": build_category_plan(selected_categories),
+        "search_plan": search_plan,
         "status": "pending",
         "started_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
