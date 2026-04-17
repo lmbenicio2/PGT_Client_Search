@@ -392,6 +392,38 @@ def get_all_selectable_categories() -> list:
         cats.update(subs)
     return sorted(cats, key=str.lower)
 
+def get_cached_bbb_categories(cache_dir: str, force_refresh: bool = False) -> list:
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, "bbb_categories_cache.json")
+
+    if (not force_refresh) and os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cats = data.get("categories", [])
+            if cats:
+                return cats
+        except Exception:
+            pass
+
+    client = BusinessSearchClient()
+    cats = client.fetch_all_bbb_categories()
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump({"updated_at": datetime.now().isoformat(), "categories": cats}, f, indent=2)
+    except Exception:
+        pass
+    return cats
+
+
+def get_available_subcategories(selected_categories: list) -> list:
+    subs = set()
+    for cat in selected_categories:
+        if cat in MAIN_CATEGORY_MAP:
+            subs.update(MAIN_CATEGORY_MAP[cat])
+    return sorted(subs, key=str.lower)
+
+
 class CSVProgressWriter:
     fieldnames = [
         "Main Category", "Subcategory", "City", "State",
@@ -1017,10 +1049,16 @@ def make_safe_job_id(text: str) -> str:
     text = re.sub(r"[^a-zA-Z0-9_\-]+", "_", text.strip())
     return text[:80].strip("_") or f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-def build_category_plan(selected_categories):
+def build_category_plan(selected_categories, selected_subcategories=None, use_all_subcategories=True):
     plan = {}
+    selected_subcategories = selected_subcategories or []
     for cat in selected_categories:
-        plan[cat] = MAIN_CATEGORY_MAP.get(cat, [cat])
+        if cat in MAIN_CATEGORY_MAP:
+            subs = MAIN_CATEGORY_MAP[cat]
+            chosen = subs if use_all_subcategories else [s for s in subs if s in selected_subcategories]
+            plan[cat] = chosen if chosen else [cat]
+        else:
+            plan[cat] = [cat]
     return plan
 
 def save_job_state(state_data: dict):
